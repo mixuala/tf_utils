@@ -11,7 +11,7 @@ log = logging.getLogger(__name__)
 class VGG:
 
   @staticmethod
-  def mean_center(arr, undo="False"):
+  def mean_center(arr, undo=False):
     """Mean center input tensors for VGG 
 
     Args:
@@ -30,7 +30,7 @@ class VGG:
         if arr.dtype != 'uint8':
           # assume array has been normalized
           rgb_mean = np.divide( rgb_mean, 255., dtype=np.float32 )
-        if undo=="False": 
+        if undo == False: 
           return np.subtract(arr.copy(), rgb_mean, dtype=np.float32)
         else:
           return np.add(arr.copy(), rgb_mean, dtype=np.float32) 
