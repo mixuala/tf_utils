@@ -10,13 +10,16 @@ log = logging.getLogger(__name__)
 
 class VGG:
 
+  # these values are constant for VGG
+  rgb_mean = np.asarray( [103.939,116.779,123.68] ) 
+
   @staticmethod
   def mean_center(arr, undo=False):
     """Mean center input tensors for VGG 
 
     Args:
       arr: np.array
-      undo: booleand, undo mean-centering operation, e.g. for display
+      undo: boolean, undo mean-centering operation, e.g. for display
     Returns:
       np.array of image data with values mean-centered for use with VGG
     """
@@ -26,16 +29,60 @@ class VGG:
     if isinstance( arr, np.ndarray):
       rank = len(arr.shape)
       if rank in (2,3,4):
-        rgb_mean = np.asarray( [103.939,116.779,123.68] ) # r,g,b values range(0,255)
-        if arr.dtype != 'uint8':
+        # r,g,b values for arr.dtype=='uint8', range(0,255)
+        # rgb_mean = np.asarray( [103.939,116.779,123.68] )
+        rgb_mean = VGG.rgb_mean.copy()
+        shouldNormalize = arr.dtype != 'uint8'
+        if shouldNormalize:
           # assume array has been normalized
           rgb_mean = np.divide( rgb_mean, 255., dtype=np.float32 )
+
         if undo == False: 
+          # assume arr is already clipped to correct bounds
           return np.subtract(arr.copy(), rgb_mean, dtype=np.float32)
         else:
-          return np.add(arr.copy(), rgb_mean, dtype=np.float32) 
+          undid = np.add(arr.copy(), rgb_mean, dtype=np.float32)
+          #  clip to correct bounds
+          maxVal = 1. if shouldNormalize else 255.
+          return np.clip(undid, 0.,  maxVal)
       else:
         log.warning( "np.array rank invalid, should be rank in (2,3,4)")
+        return arr
+
+  @staticmethod
+  def tf_mean_center(arr, undo=False):
+    """Mean center input tensors for VGG, for use in tf.graph()
+
+    typically applied to style transfer image which is initialized as tf.random.uniform()
+
+    Args:
+      arr: tf.tensor
+      undo: boolean, undo mean-centering operation
+    Returns:
+      tf.tensor of image data with values mean-centered for use with VGG
+    """
+
+    if isinstance( arr, tf.Tensor):
+      rank = len(arr.shape)
+      if rank in (2,3,4):
+        # r,g,b values for arr.dtype=='uint8', range(0,255)
+        # rgb_mean = np.asarray( [103.939,116.779,123.68] ) 
+        rgb_mean = VGG.rgb_mean.copy()
+        shouldNormalize = arr.dtype != 'uint8'
+        if shouldNormalize:
+          # assume array has been normalized
+          rgb_mean = np.divide( rgb_mean, 255., dtype=np.float32 )
+
+        if undo == False: 
+          # assume arr is already clipped to correct bounds
+          return tf.subtract(arr, rgb_mean)
+        else:
+          undid = tf.add(arr, rgb_mean)
+          #  clip to correct bounds
+          maxVal = 1. if shouldNormalize else 255.
+          return tf.clip_by_value(undid, 0.,  maxVal)
+      else:
+        log.warning( "tf.Tensor rank invalid, should be rank in (2,3,4)")
         return arr
         
 
