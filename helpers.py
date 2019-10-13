@@ -21,7 +21,7 @@ class VGG:
       np.array of image data with values mean-centered for use with VGG
     """
     if isinstance(arr, (list, tuple)): 
-      return [mean_center(o) for o in arr]
+      return [VGG.mean_center(o) for o in arr]
 
     if isinstance( arr, np.ndarray):
       rank = len(arr.shape)
@@ -49,7 +49,7 @@ class VGG:
       np.array of rank=3 with RGB channels reversed
     """
     if isinstance(arr, (list, tuple)): 
-      return [rgb_reverse(o) for o in arr]
+      return [VGG.rgb_reverse(o) for o in arr]
 
     x = arr.copy()
     assert arr.shape[-1] == 3, ("Input image(s) must be of shape=(b,h,w,3) or (h,w,3)")
@@ -59,7 +59,7 @@ class VGG:
       
 
   @staticmethod
-  def VGG_preprocessing(images, mean_center=True, bgr_ordering=True, undo=False):
+  def apply_preprocessing(images, mean_center=True, bgr_ordering=True, undo=False):
     """apply standard VGG pre-processing
     Args:
       images: array or list of rgb images
@@ -71,16 +71,16 @@ class VGG:
       batch or list of images as nparrays
     """
     if isinstance(images, (list, tuple)): 
-      return [VGG_preprocessing(image, mean_center, bgr_ordering, undo) for image in images]
+      return [VGG.apply_preprocessing(image, mean_center, bgr_ordering, undo) for image in images]
 
     if undo and bgr_ordering:
       # return to rgb ordering BEFORE mean_center()
-      images = rgb_reverse(images)
+      images = VGG.rgb_reverse(images)
     if mean_center:
-      images = helpers.VGG.mean_center(images, undo=undo)
+      images = VGG.mean_center(images, undo=undo)
 
     if undo == False and bgr_ordering:
-      images = rgb_reverse(images)
+      images = VGG.rgb_reverse(images)
     return images
 
 
