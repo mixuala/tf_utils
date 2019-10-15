@@ -150,3 +150,32 @@ class Image:
     *dim,_ = arr.shape
     target =  tuple( np.array(dim)//scale )
     return resize( arr, target ).astype('float32')
+
+  def hstack_style_transfer_results( results, transfer_index=0, most_recent=True):
+    """hstack a batch of `style_transfer` results
+
+    assumes style_transfer results are an array of shape=(3, h,w,c) e.g. [content_image, transfer_image, style_image] 
+    Args:
+      results: style_transfer, result or batch of style_transfer results
+      transfer_index: index of style_transfer_input in the style_transfer result
+      most_recent: style_transfer inserts most_recent result on the left as default
+    Returns:
+      np.array: 1 hstacked image with the series of style transfer images in the middle, sorted by most recent
+    """
+    insert_position = 1 if most_recent else -1 
+    results = np.asarray(results)
+    rank = len(results.shape)
+    assert 3 <= rank and rank <=5, ("expecting batch, or batch of batches of visualizations of shape=(h,w,c)")
+    if rank == 4: np.expand_dims(results, axis=0) # batch of batches
+    assert results.shape[1] ==3, ("expecting 3 images: content, style, and style_transfer") 
+    ordered = []
+    for i in range(results.shape[0]):
+      if len(ordered) ==0: 
+        # add first and last
+        ordered += np.squeeze(np.delete(results[0].copy(), transfer_index, axis=0)).tolist()
+      # insert style_transfer image in the middle
+      ordered.insert(insert_position, np.squeeze(results[i][transfer_index]) )  
+      
+    hstacked = np.concatenate( np.asarray(ordered), axis=1 )
+    # print("hstacked images, count=", results.shape[0]+2 ,hstacked.shape)
+    return hstacked
