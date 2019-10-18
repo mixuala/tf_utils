@@ -132,7 +132,7 @@ class VGG:
 
 
 
-from skimage.transform import resize
+from skimage.transform import resize as skimage_resize
 
 class Image:
 
@@ -149,45 +149,43 @@ class Image:
     """
     *dim,_ = arr.shape
     target =  tuple( np.array(dim)//scale )
-    return resize( arr, target ).astype('float32')
+    return skimage_resize( arr, target ).astype('float32')
 
+  @staticmethod
+  def resize(arr, shape, resize_method='contained'):
+    """resize image array using skimage.transform.resize
 
-def resize(arr, shape, resize_method='contained'):
-  """resize image array using skimage.transform.resize
+    use resize_method='contained' to shrink content_image to be contained by the size of shape
+    
+    Args:
+      arr: array shape=(h,w,c)
+      shape: target size, shape=(h,w)
+      resize_method: 
+        'contained' will resize arr so it fits inside shape
 
-  use resize_method='contained' to shrink content_image to be contained by the size of shape
-  
-  Args:
-    arr: array shape=(h,w,c)
-    shape: target size, shape=(h,w)
-    resize_method: 
-      'contained' will resize arr so it fits inside shape
+    Returns:
+      array shape=(h,w,c)
+    """
 
-  Returns:
-    array shape=(h,w,c)
-  """
-  from skimage.transform import resize
+    if isinstance(arr, (list, tuple)): 
+      return [Image.resize(o, shape, resize_method) for o in arr]
 
-  if isinstance(arr, (list, tuple)): 
-    return [Image.resize(o, shape, resize_method) for o in arr]
+    rank = len(arr.shape)
+    assert rank == 3, ("expecting array of shape=(h,w,c)")
 
-  rank = len(arr.shape)
-  assert rank == 3, ("expecting array of shape=(h,w,c)")
-
-  if ( arr.shape[:2] == shape[:2] ):
-    return arr
-  if (resize_method is None): 
-    return resize( arr, shape[:2], anti_aliasing=True )
-  if (resize_method is 'contained'):
-    isContained = np.max(np.array(arr.shape) - np.array(shape))
-    if (isContained <=0 ):
+    if ( arr.shape[:2] == shape[:2] ):
       return arr
-    ratio = np.max(np.array(arr.shape) / np.array(shape))
-    target = (arr.shape[:2] / ratio).astype(int)
-    # print('target=', target, arr.shape, shape)
-    return resize( arr, target, anti_aliasing=True ) 
-
-
+    if (resize_method is None): 
+      return skimage_resize( arr, shape[:2], anti_aliasing=True )
+    if (resize_method is 'contained'):
+      isContained = np.max(np.array(arr.shape) - np.array(shape))
+      if (isContained <=0 ):
+        return arr
+      ratio = np.max(np.array(arr.shape) / np.array(shape))
+      target = (arr.shape[:2] / ratio).astype(int)
+      # print('target=', target, arr.shape, shape)
+      return skimage_resize( arr, target, anti_aliasing=True ) 
+      
 
   def hstack_style_transfer_results( results, transfer_index=0, most_recent=True):
     """hstack a batch of `style_transfer` results
