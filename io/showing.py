@@ -25,10 +25,10 @@ import IPython.display
 from string import Template
 import tensorflow as tf
 
-from lucid.misc.io.serialize_array import serialize_array, array_to_jsbuffer
+from tf_utils.io.serialize_array import serialize_array, array_to_jsbuffer
 
 
-# create logger with module name, e.g. lucid.misc.io.showing
+# create logger with module name, e.g. tf_utils.io.showing
 log = logging.getLogger(__name__)
 
 
@@ -92,35 +92,44 @@ def images(arrays, labels=None, domain=None, w=None):
   for i, array in enumerate(arrays):
     url = _image_url(array)
     label = labels[i] if labels is not None else i
+    width = """width:{w}px;""".format(w=w) if w is not None else ""
     s += """<div style="margin-right:10px;">
               {label}<br/>
-              <img src="{url}" style="margin-top:4px;">
-            </div>""".format(label=label, url=url)
+              <img src="{url}" style="margin-top:4px;{width}">
+            </div>""".format(label=label, url=url, width=width)
   s += "</div>"
   _display_html(s)
 
 
-def show(thing, domain=(0, 1)):
-  """Display a nupmy array without having to specify what it represents.
+def show(thing, domain=(0, 1), **kwargs):
+  """Display a numpy array without having to specify what it represents.
 
   This module will attempt to infer how to display your tensor based on its
   rank, shape and dtype. rank 4 tensors will be displayed as image grids, rank
   2 and 3 tensors as images.
+
+  Args:
+    thing: A list of NumPy arrays representing images
+    domain: Domain of pixel values, inferred from min & max values if None
+    labels: A list of strings to label each image.
+      Defaults to show index if None
+    w: width of output image, scaled using nearest neighbor interpolation.
+      size unchanged if None
   """
   if isinstance(thing, np.ndarray):
     rank = len(thing.shape)
     if rank == 4:
       log.debug("Show is assuming rank 4 tensor to be a list of images.")
-      images(thing, domain=domain)
+      images(thing, domain=domain, **kwargs)
     elif rank in (2, 3):
       log.debug("Show is assuming rank 2 or 3 tensor to be an image.")
-      image(thing, domain=domain)
+      image(thing, domain=domain, **kwargs)
     else:
       log.warning("Show only supports numpy arrays of rank 2-4. Using repr().")
       print(repr(thing))
   elif isinstance(thing, (list, tuple)):
     log.debug("Show is assuming list or tuple to be a collection of images.")
-    images(thing, domain=domain)
+    images(thing, domain=domain, **kwargs)
   else:
     log.warning("Show only supports numpy arrays so far. Using repr().")
     print(repr(thing))

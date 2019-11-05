@@ -35,11 +35,11 @@ import json
 import numpy as np
 import PIL.Image
 
-from lucid.misc.io.writing import write_handle
-from lucid.misc.io.serialize_array import _normalize_array
+from tf_utils.io.writing import write_handle
+from tf_utils.io.serialize_array import _normalize_array
 
 
-# create logger with module name, e.g. lucid.misc.io.saving
+# create logger with module name, e.g. tf_utils.io.saving
 log = logging.getLogger(__name__)
 
 

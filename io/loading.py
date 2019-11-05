@@ -31,10 +31,10 @@ import PIL.Image
 import tensorflow as tf
 from google.protobuf.message import DecodeError
 
-from lucid.misc.io.reading import read_handle
+from tf_utils.io.reading import read_handle
 
 
-# create logger with module name, e.g. lucid.misc.io.reading
+# create logger with module name, e.g. tf_utils.io.reading
 log = logging.getLogger(__name__)
 
 

@@ -23,8 +23,19 @@ from __future__ import absolute_import, division, print_function
 
 from contextlib import contextmanager
 from urllib.parse import urlparse
-from tensorflow import gfile
 import os
+
+# from tensorflow import gfile
+import tensorflow as tf
+if tf.__version__.startswith("2."):
+  gfile = tf.io.gfile
+  # monkey_patch 1.x aliases
+  setattr(gfile, "Open", gfile.GFile) 
+  setattr(gfile, "MakeDirs", gfile.makedirs) 
+else:
+  from tensorflow import gfile
+
+
 
 
 def _supports_make_dirs(path):

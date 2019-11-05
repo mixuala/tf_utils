@@ -30,16 +30,24 @@ import re
 import logging
 from urllib.parse import urlparse, urljoin
 from future.moves.urllib import request
-from tensorflow import gfile
 from tempfile import gettempdir
 from io import BytesIO, StringIO
 import gc
 from filelock import FileLock
 
-from lucid.misc.io.writing import write, write_handle
+# from tensorflow import gfile
+import tensorflow as tf
+if tf.__version__.startswith("2."):
+  gfile = tf.io.gfile
+  # monkey_patch alias `gfile.Open()`
+  setattr(gfile, "Open", gfile.GFile) 
+else:
+  from tensorflow import gfile
+
+from tf_utils.io.writing import write, write_handle
 
 
-# create logger with module name, e.g. lucid.misc.io.reading
+# create logger with module name, e.g. tf_utils.io.reading
 log = logging.getLogger(__name__)
 
 
