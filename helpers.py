@@ -43,9 +43,9 @@ class VGG:
         # r,g,b values for arr.dtype=='uint8', range(0,255)
         # rgb_mean = np.asarray( [103.939,116.779,123.68] )
         rgb_mean = VGG.rgb_mean.copy()
-        do_normalize = True if arr.dtype == 'uint8' else np.max(arr>1.0)
-        if do_normalize:
-          # assume array has been normalized
+        is_normalized = False if arr.dtype == 'uint8' else np.max(arr<=1.0)
+        if is_normalized:
+          # normalize rgb_mean
           rgb_mean = np.divide( rgb_mean, 255., dtype=np.float32 )
 
         if undo == False: 
@@ -54,7 +54,7 @@ class VGG:
         else:
           undid = np.add(arr.copy(), rgb_mean, dtype=np.float32)
           #  clip to correct bounds
-          maxVal = 1. if do_normalize else 255.
+          maxVal = 1. if is_normalized else 255.
           return np.clip(undid, 0.,  maxVal)
       else:
         log.warning( "np.array rank invalid, should be rank in (2,3,4)")
@@ -79,8 +79,9 @@ class VGG:
         # r,g,b values for arr.dtype=='uint8', range(0,255)
         # rgb_mean = np.asarray( [103.939,116.779,123.68] ) 
         rgb_mean = tf.convert_to_tensor(VGG.rgb_mean)
-        do_normalize = True if arr.dtype == tf.uint8 else tf.math.reduce_max(arr)>1.0
-        if do_normalize:
+        is_normalized = False if arr.dtype == tf.uint8 else tf.math.reduce_max(arr)<=1.0
+        if is_normalized:
+          # normalize rgb_mean
           rgb_mean = tf.divide( rgb_mean, 255., dtype=tf.float32 )
 
         if undo == False: 
@@ -89,7 +90,7 @@ class VGG:
         else:
           undid = tf.add(arr, rgb_mean)
           #  clip to correct bounds
-          maxVal = 1. if do_normalize else 255.
+          maxVal = 1. if is_normalized else 255.
           return tf.clip_by_value(undid, 0.,  maxVal)
       else:
         log.warning( "tf.Tensor rank invalid, should be rank in (2,3,4)")
