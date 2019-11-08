@@ -116,6 +116,8 @@ def show(thing, domain=(0, 1), **kwargs):
     w: width of output image, scaled using nearest neighbor interpolation.
       size unchanged if None
   """
+  if hasattr(thing,'numpy') and callable(thing.numpy):
+    thing = thing.numpy()
   if isinstance(thing, np.ndarray):
     rank = len(thing.shape)
     if rank == 4:
