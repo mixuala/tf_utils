@@ -18,13 +18,13 @@ class VGG:
   def mean_center(arr, undo=False):
     """Mean center input tensors for VGG 
 
-    apply imagenet zero-mean and normal stddev to batch
+    apply imagenet zero-mean  to batch
     NOTE: expects RGB ordering, don't forget to reverse to BGR in next step
     Args:
       arr: np.array with RGB ordering
       undo: boolean, undo mean-centering operation, e.g. for display
     Returns:
-      np.array of image data with values mean-centered for use with VGG
+      np.array of image data with values mean-centered, but NOT explicitly BGR ordered or normalized
     """
 
     # def normalize_batch(batch):
@@ -70,19 +70,19 @@ class VGG:
       arr: tf.tensor
       undo: boolean, undo mean-centering operation
     Returns:
-      tf.tensor of image data with values mean-centered for use with VGG
+      tf.tensor of image data with values mean-centered, but NOT explicitly BGR ordered or normalized
     """
 
     if isinstance( arr, tf.Tensor):
       rank = len(arr.shape)
       if rank in (2,3,4):
         # r,g,b values for arr.dtype=='uint8', range(0,255)
-        # rgb_mean = np.asarray( [103.939,116.779,123.68] ) 
-        rgb_mean = tf.convert_to_tensor(VGG.rgb_mean)
-        is_normalized = False if arr.dtype == tf.uint8 else tf.math.reduce_max(arr)<=1.0
+        # rgb_mean = np.asarray( [103.939,116.779,123.68] )
+        rgb_mean = tf.convert_to_tensor(VGG2.rgb_mean, dtype=tf.float32)
+        is_normalized = False if arr.dtype == tf.uint8 else tf.less_equal(tf.math.reduce_max(arr),1.0) is not None
         if is_normalized:
           # normalize rgb_mean
-          rgb_mean = tf.divide( rgb_mean, 255., dtype=tf.float32 )
+          rgb_mean = tf.divide( rgb_mean, tf.constant(255., dtype=tf.float32) )
 
         if undo == False: 
           # assume arr is already clipped to correct bounds
@@ -126,7 +126,7 @@ class VGG:
       undo: boolean, default False. reverse preprocessing for display
 
     Returns:
-      batch or list of images as nparrays
+      batch or list of images as ndarrays with mean_center and BGR ordering, but NOT normalized
     """
     if isinstance(images, (list, tuple)): 
       return [VGG.apply_preprocessing(image, mean_center, bgr_ordering, undo) for image in images]
