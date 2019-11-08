@@ -11,18 +11,29 @@ log = logging.getLogger(__name__)
 class VGG:
 
   # these values are constant for VGG
-  rgb_mean = np.asarray( [103.939,116.779,123.68] ) 
+  rgb_mean = np.asarray( [123.68, 116.779, 103.939] ) 
+
 
   @staticmethod
   def mean_center(arr, undo=False):
     """Mean center input tensors for VGG 
 
+    apply imagenet zero-mean and normal stddev to batch
+    NOTE: expects RGB ordering, don't forget to reverse to BGR in next step
     Args:
-      arr: np.array
+      arr: np.array with RGB ordering
       undo: boolean, undo mean-centering operation, e.g. for display
     Returns:
       np.array of image data with values mean-centered for use with VGG
     """
+
+    # def normalize_batch(batch):
+    #   # normalize using imagenet mean and std
+    #   mean = batch.new_tensor([0.485, 0.456, 0.406]).view(-1, 1, 1)
+    #   std = batch.new_tensor([0.229, 0.224, 0.225]).view(-1, 1, 1)
+    #   batch = batch.div_(255.0)
+    #   return (batch - mean) / std
+
     if isinstance(arr, (list, tuple)): 
       return [VGG.mean_center(o) for o in arr]
 
@@ -32,8 +43,8 @@ class VGG:
         # r,g,b values for arr.dtype=='uint8', range(0,255)
         # rgb_mean = np.asarray( [103.939,116.779,123.68] )
         rgb_mean = VGG.rgb_mean.copy()
-        shouldNormalize = arr.dtype != 'uint8'
-        if shouldNormalize:
+        do_normalize = True if arr.dtype == 'uint8' else np.max(arr>1.0)
+        if do_normalize:
           # assume array has been normalized
           rgb_mean = np.divide( rgb_mean, 255., dtype=np.float32 )
 
@@ -43,7 +54,7 @@ class VGG:
         else:
           undid = np.add(arr.copy(), rgb_mean, dtype=np.float32)
           #  clip to correct bounds
-          maxVal = 1. if shouldNormalize else 255.
+          maxVal = 1. if do_normalize else 255.
           return np.clip(undid, 0.,  maxVal)
       else:
         log.warning( "np.array rank invalid, should be rank in (2,3,4)")
@@ -67,11 +78,10 @@ class VGG:
       if rank in (2,3,4):
         # r,g,b values for arr.dtype=='uint8', range(0,255)
         # rgb_mean = np.asarray( [103.939,116.779,123.68] ) 
-        rgb_mean = VGG.rgb_mean.copy()
-        shouldNormalize = arr.dtype != 'uint8'
-        if shouldNormalize:
-          # assume array has been normalized
-          rgb_mean = np.divide( rgb_mean, 255., dtype=np.float32 )
+        rgb_mean = tf.convert_to_tensor(VGG.rgb_mean)
+        do_normalize = True if arr.dtype == tf.uint8 else tf.math.reduce_max(arr)>1.0
+        if do_normalize:
+          rgb_mean = tf.divide( rgb_mean, 255., dtype=tf.float32 )
 
         if undo == False: 
           # assume arr is already clipped to correct bounds
@@ -79,7 +89,7 @@ class VGG:
         else:
           undid = tf.add(arr, rgb_mean)
           #  clip to correct bounds
-          maxVal = 1. if shouldNormalize else 255.
+          maxVal = 1. if do_normalize else 255.
           return tf.clip_by_value(undid, 0.,  maxVal)
       else:
         log.warning( "tf.Tensor rank invalid, should be rank in (2,3,4)")
@@ -123,7 +133,8 @@ class VGG:
     if undo and bgr_ordering:
       # return to rgb ordering BEFORE mean_center()
       images = VGG.rgb_reverse(images)
-    if mean_center:
+
+    if mean_center: # expecting images to be in RGB ordering
       images = VGG.mean_center(images, undo=undo)
 
     if undo == False and bgr_ordering:
@@ -178,7 +189,7 @@ class Image:
     if (resize_method is None): 
       return skimage_resize( arr, shape[:2], anti_aliasing=True )
     if (resize_method is 'contained'):
-      isContained = np.max(np.array(arr.shape) - np.array(shape))
+      isContained = np.max(np.array(arr.shape[:2]) - np.array(shape[:2]))
       if (isContained <=0 ):
         return arr
       ratio = np.max(np.array(arr.shape) / np.array(shape))
