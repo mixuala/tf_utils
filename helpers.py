@@ -22,7 +22,7 @@ class VGG:
     NOTE: expects RGB ordering, don't forget to reverse to BGR in next step
     Args:
       arr: np.array with RGB ordering
-      undo: boolean, undo mean-centering operation, e.g. for display
+      undo: boolean, undo mean-centering operation and clipped to domain, e.g. for display
     Returns:
       np.array of image data with values mean-centered, but NOT explicitly BGR ordered or normalized
     """
@@ -37,28 +37,35 @@ class VGG:
     if isinstance(arr, (list, tuple)): 
       return [VGG.mean_center(o) for o in arr]
 
-    if isinstance( arr, np.ndarray):
-      rank = len(arr.shape)
-      if rank in (2,3,4):
-        # r,g,b values for arr.dtype=='uint8', range(0,255)
-        # rgb_mean = np.asarray( [103.939,116.779,123.68] )
-        rgb_mean = VGG.rgb_mean.copy()
-        is_normalized = False if arr.dtype == 'uint8' else np.max(arr<=1.0)
-        if is_normalized:
-          # normalize rgb_mean
-          rgb_mean = np.divide( rgb_mean, 255., dtype=np.float32 )
+    if tf.is_tensor( arr ):
+      return VGG.tf_mean_center(arr)
 
-        if undo == False: 
-          # assume arr is already clipped to correct bounds
-          return np.subtract(arr.copy(), rgb_mean, dtype=np.float32)
-        else:
-          undid = np.add(arr.copy(), rgb_mean, dtype=np.float32)
-          #  clip to correct bounds
-          maxVal = 1. if is_normalized else 255.
-          return np.clip(undid, 0.,  maxVal)
+    assert isinstance( arr, np.ndarray), "expecting ndarray"
+    rank = len(arr.shape)
+    if rank in (2,3,4):
+      # r,g,b values for arr.dtype=='uint8', range(0,255)
+      # rgb_mean = np.asarray( [123.68, 116.779, 103.939] ) 
+      rgb_mean = VGG.rgb_mean.copy()
+      is_normalized = False if arr.dtype == 'uint8' else np.max(arr<=1.0)
+      if is_normalized:
+        # normalize rgb_mean
+        rgb_mean = np.divide( rgb_mean, 255., dtype=np.float32 )
+
+      if undo == False: 
+        # assume arr is already clipped to correct bounds
+        # print( "mean_center RGB/APPLY, is_normalized=",is_normalized, rgb_mean )
+        return np.subtract(arr.copy(), rgb_mean, dtype=np.float32)
       else:
-        log.warning( "np.array rank invalid, should be rank in (2,3,4)")
-        return arr
+        # print( "mean_center RGB/REMOVE, is_normalized=",is_normalized, rgb_mean, )
+        # print(" .  ",tf.reduce_mean(vgg_transfer_image, axis=[1,2], keepdims=True))
+        undid = np.add(arr.copy(), rgb_mean, dtype=np.float32)
+        #  clip to correct bounds
+        maxVal = 1. if is_normalized else 255.
+        return np.clip(undid, 0.,  maxVal)
+
+    else:
+      log.warning( "np.array rank invalid, should be rank in (2,3,4)")
+      return arr
 
   @staticmethod
   def tf_mean_center(arr, undo=False):
@@ -73,28 +80,33 @@ class VGG:
       tf.tensor of image data with values mean-centered, but NOT explicitly BGR ordered or normalized
     """
 
-    if isinstance( arr, tf.Tensor):
-      rank = len(arr.shape)
-      if rank in (2,3,4):
-        # r,g,b values for arr.dtype=='uint8', range(0,255)
-        # rgb_mean = np.asarray( [103.939,116.779,123.68] )
-        rgb_mean = tf.convert_to_tensor(VGG2.rgb_mean, dtype=tf.float32)
-        is_normalized = False if arr.dtype == tf.uint8 else tf.less_equal(tf.math.reduce_max(arr),1.0) is not None
-        if is_normalized:
-          # normalize rgb_mean
-          rgb_mean = tf.divide( rgb_mean, tf.constant(255., dtype=tf.float32) )
+    assert tf.is_tensor( arr ), "expecting a tensor"
 
-        if undo == False: 
-          # assume arr is already clipped to correct bounds
-          return tf.subtract(arr, rgb_mean)
-        else:
-          undid = tf.add(arr, rgb_mean)
-          #  clip to correct bounds
-          maxVal = 1. if is_normalized else 255.
-          return tf.clip_by_value(undid, 0.,  maxVal)
+    rank = len(arr.shape)
+    if rank in (2,3,4):
+      # r,g,b values for arr.dtype=='uint8', range(0,255)
+      # rgb_mean = np.asarray( [103.939,116.779,123.68] )
+      rgb_mean = tf.convert_to_tensor(VGG.rgb_mean, dtype=tf.float32)
+      is_normalized = False if arr.dtype == tf.uint8 else tf.less_equal(tf.math.reduce_max(arr),1.0) is not None
+      if is_normalized:
+        # normalize rgb_mean
+        rgb_mean = tf.divide( rgb_mean, tf.constant(255., dtype=tf.float32) )
+
+      if undo == False: 
+        # assume arr is already clipped to correct bounds
+        # tf.print( "mean_center RGB/APPLY, is_normalized=",is_normalized )
+        return tf.subtract(arr, rgb_mean)
       else:
-        log.warning( "tf.Tensor rank invalid, should be rank in (2,3,4)")
-        return arr
+        # tf.print( "tf_mean_center RGB/REMOVE, is_normalized=",is_normalized, rgb_mean, )
+        # tf.print(" .  ",tf.reduce_mean(vgg_transfer_image, axis=[1,2], keepdims=True))
+        undid = tf.add(arr, rgb_mean)
+        #  clip to correct bounds
+        maxVal = 1. if is_normalized else 255.
+        return tf.clip_by_value(undid, 0.,  maxVal)
+    else:
+      log.warning( "tf.Tensor rank invalid, should be rank in (2,3,4)")
+      return arr
+      
         
 
   @staticmethod
@@ -109,7 +121,8 @@ class VGG:
     if isinstance(arr, (list, tuple)): 
       return [VGG.rgb_reverse(o) for o in arr]
 
-    x = arr.copy()
+    # print("rgb_reverse(): arr=", type(arr))
+    x = tf.identity(arr) if tf.is_tensor(arr) else arr.copy()
     assert arr.shape[-1] == 3, ("Input image(s) must be of shape=(b,h,w,3) or (h,w,3)")
     rank = len(arr.shape)
     if rank in (3,4) and arr.shape[-1] == 3:
@@ -132,13 +145,16 @@ class VGG:
       return [VGG.apply_preprocessing(image, mean_center, bgr_ordering, undo) for image in images]
 
     if undo and bgr_ordering:
+      # print("bgr => RGB", images.shape)
       # return to rgb ordering BEFORE mean_center()
       images = VGG.rgb_reverse(images)
 
     if mean_center: # expecting images to be in RGB ordering
+      # print("mean_center, undo=",undo, images.shape)
       images = VGG.mean_center(images, undo=undo)
 
     if undo == False and bgr_ordering:
+      # print("RGB => bgr, shape=", images.shape)
       images = VGG.rgb_reverse(images)
     return images
 
