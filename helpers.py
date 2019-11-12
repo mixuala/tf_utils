@@ -251,3 +251,54 @@ class Image:
     hstacked = np.concatenate( np.asarray(ordered), axis=1 )
     # print("hstacked images, count=", results.shape[0]+2 ,hstacked.shape)
     return hstacked
+
+  @staticmethod
+  def upload_imgur(dataURL, pick=None):
+    """upload base64 dataURL to imgur and get static url
+
+    see: https://apidocs.imgur.com/?version=latest#c85c9dfc-7487-4de2-9ecd-66f727cf3139
+
+    usage: 
+      dataurl="data:image/PNG;base64,[...]"
+      check = helpers.Image.upload_imgur(imgdata)
+      print(check['link'])
+
+    NOTE: max dataURL size is MAX_ARG_STRLEN = 131072 bytes
+
+    Args:
+      dataURL: string
+      pick: pick keys to return, see API. default=['id', 'link', 'deletehash']
+
+    Returns: dict={id:, link:, deletehash:}
+    """
+    from html import escape
+    from json import loads
+    CLIENT_ID = "a098034b70f2f30"
+    MAX_ARG_STRLEN = 131072
+    default_pick = ['id', 'link', 'deletehash']
+    pick = pick if pick is not None else default_pick
+
+    assert dataURL.startswith("data:image"), "ERROR: expecting an image dataURL" 
+    dataURL = dataURL.split(',',1).pop() # strip base64 prefix
+    payload = "image={}".format( escape(dataURL) )
+
+    # ## NOTE: additional post params are not working
+    # extras = ""
+    # if title is not None:
+    #   extras += "&title={}".format( escape(title) )
+    # if desc is not None:
+    #   extras += "&description={}".format( escape(desc) )
+    # print("extras", extras)
+    # payload += extras
+
+    assert len(payload) < MAX_ARG_STRLEN, "ERROR: MAX_ARG_STRLEN exceeeded"
+
+    resp = !curl --location --request POST "https://api.imgur.com/3/image" \
+      --header "Authorization: Client-ID $CLIENT_ID " \
+      --form "$payload"
+    resp = loads(resp[0])
+    assert resp['success'], "Imgur API error: {}".format(resp)
+    data = resp['data']
+    # print(data)
+    result = { k:v for k,v in data.items() if k in pick and v is not None }
+    return result
