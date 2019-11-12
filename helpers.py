@@ -85,7 +85,7 @@ class VGG:
     rank = len(arr.shape)
     if rank in (2,3,4):
       # r,g,b values for arr.dtype=='uint8', range(0,255)
-      # rgb_mean = np.asarray( [103.939,116.779,123.68] )
+      # rgb_mean = np.asarray( [123.68, 116.779, 103.939] ) 
       rgb_mean = tf.convert_to_tensor(VGG.rgb_mean, dtype=tf.float32)
       is_normalized = False if arr.dtype == tf.uint8 else tf.less_equal(tf.math.reduce_max(arr),1.0) is not None
       if is_normalized:
@@ -203,16 +203,24 @@ class Image:
 
     if ( arr.shape[:2] == shape[:2] ):
       return arr
+
+    target_shape = shape[:2]
+    _resize_cmd = tf.image.resize if tf.is_tensor(arr) else skimage_resize
+
+    # see also: tf.image.resize( input, target_shape )
+    x = tf.image.resize(x, target_shape)
+
     if (resize_method is None): 
-      return skimage_resize( arr, shape[:2], anti_aliasing=True )
+      return _resize_cmd( arr, shape[:2], anti_aliasing=True )
+
     if (resize_method is 'contained'):
       isContained = np.max(np.array(arr.shape[:2]) - np.array(shape[:2]))
       if (isContained <=0 ):
         return arr
       ratio = np.max(np.array(arr.shape) / np.array(shape))
-      target = (arr.shape[:2] / ratio).astype(int)
-      # print('target=', target, arr.shape, shape)
-      return skimage_resize( arr, target, anti_aliasing=True ) 
+      target_shape = (arr.shape[:2] / ratio).astype(int)
+      # print('target=', target_shape, arr.shape, shape)
+      return _resize_cmd( arr, target_shape, anti_aliasing=True ) 
       
 
   def hstack_style_transfer_results( results, transfer_index=0, most_recent=True):
