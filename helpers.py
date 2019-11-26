@@ -337,7 +337,6 @@ class Image:
 
     assert dataURL.startswith("data:image"), "ERROR: expecting an image dataURL" 
     dataURL = dataURL.split(',',1).pop() # strip base64 prefix
-    payload = "image={}".format( escape(dataURL) )
 
     # ## NOTE: additional post params are not working
     # extras = ""
@@ -349,10 +348,14 @@ class Image:
     # payload += extras
 
     assert len(payload) < MAX_ARG_STRLEN, "ERROR: MAX_ARG_STRLEN exceeeded"
-
-    resp = !curl --location --request POST "https://api.imgur.com/3/image" \
-      --header "Authorization: Client-ID $CLIENT_ID " \
-      --form "$payload"
+    import requests
+    headers = {
+        'Authorization': 'Client-ID $CLIENT_ID',
+    }
+    resp = requests.post('https://api.imgur.com/3/image', headers=headers, data={'image':escape(dataURL)})
+    # resp = !curl --location --request POST "https://api.imgur.com/3/image" \
+    #   --header "Authorization: Client-ID $CLIENT_ID " \
+    #   --form "$payload"
     resp = loads(resp[0])
     assert resp['success'], "Imgur API error: {}".format(resp)
     data = resp['data']
