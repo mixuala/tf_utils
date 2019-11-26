@@ -160,6 +160,64 @@ class VGG:
 
 
 
+class ImgStacker():
+  """log a series of learned images with the same shape
+
+  typically a series of samples from one epoch in a row
+  with each row from successive epochs
+  """
+  shape=None
+  h_items=[]
+  v_items=[]
+
+  def _check_shape(self, image):
+    shape = tf.squeeze(image).shape
+    if self.shape is None:
+      assert len(shape)==3 # shape=(h,w,c)
+      self.shape = shape
+    else:
+      h,w,c = shape
+      assert h==self.shape[0] and w==self.shape[1] and c==self.shape[2], "expecting shape={}, got: {}".format(self.shape, shape)
+
+  def clear(self):
+    self.shape=None
+    self.h_items=[]
+    self.v_items=[]
+
+  def shape(self):
+    return (len(self.v_items), len(self.h_items))
+
+  def hstack(self, image=None, limit=10, smaller=True):
+    """stack a horizonal row of images into 1 ndarray, most recent first
+    
+      Args:
+        image, shape=(h,w,c), if None, returns current hstack
+      Returns: shape=(h,n*w,c), n<=limit
+    """
+    if image is not None:
+      if smaller:
+        image = Image.smaller(np.squeeze(image))
+      self.h_items.insert(0, image) # most recent on the left
+      self.h_items = self.h_items[:limit]
+    return np.concatenate( np.asarray(self.h_items), axis=1 )  # shape=(h,n*w,c)
+
+  def vstack(self, row=None, limit=10):
+    """stack a vertical row of images into 1 ndarray, most recent last
+    
+      Args:
+        row, shape=(h,w,c), if None, returns current hstack
+      Returns: shape=(n*h,w,c), n<=limit
+    """
+    if row is not None:
+      if len(self.v_items)>0:
+        assert row.shape==self.v_items[0].shape, "expecting row of shape={}".format(self.v_items[0].shape)
+      self.v_items.append(row) # most recent on the left
+      self.v_items = self.v_items[:limit]
+    return np.concatenate( np.asarray(self.v_items), axis=0 )  # shape=(n*h,w,c)
+    
+
+
+
 from skimage.transform import resize as skimage_resize
 
 class Image:
@@ -220,8 +278,7 @@ class Image:
       ratio = np.max(np.array(arr.shape) / np.array(shape))
       target_shape = (arr.shape[:2] / ratio).astype(int)
       # print('target=', target_shape, arr.shape, shape)
-      return _resize_cmd( arr, target_shape, anti_aliasing=True ) 
-      
+      return _resize_cmd( arr, target_shape, anti_aliasing=True )
 
   def hstack_style_transfer_results( results, transfer_index=0, most_recent=True):
     """hstack a batch of `style_transfer` results
@@ -243,7 +300,7 @@ class Image:
     ordered = []
     for i in range(results.shape[0]):
       if len(ordered) ==0: 
-        # add first and last
+        # add content and style image
         ordered += np.squeeze(np.delete(results[0].copy(), transfer_index, axis=0)).tolist()
       # insert style_transfer image in the middle
       ordered.insert(insert_position, np.squeeze(results[i][transfer_index]) )  
