@@ -166,21 +166,21 @@ class ImgStacker():
   typically a series of samples from one epoch in a row
   with each row from successive epochs
   """
-  shape=None
+  _shape=None
   h_items=[]
   v_items=[]
 
   def _check_shape(self, image):
     shape = tf.squeeze(image).shape
-    if self.shape is None:
+    if self._shape is None:
       assert len(shape)==3 # shape=(h,w,c)
-      self.shape = shape
+      self._shape = shape
     else:
       h,w,c = shape
-      assert h==self.shape[0] and w==self.shape[1] and c==self.shape[2], "expecting shape={}, got: {}".format(self.shape, shape)
+      assert h==self._shape[0] and w==self._shape[1] and c==self._shape[2], "expecting shape={}, got: {}".format(self._shape, shape)
 
   def clear(self):
-    self.shape=None
+    self._shape=None
     self.h_items=[]
     self.v_items=[]
 
