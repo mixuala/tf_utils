@@ -214,7 +214,7 @@ class ImgStacker():
       self.v_items.insert(0, row) # most recent on the top
       self.v_items = self.v_items[:limit]
     if len(self.v_items)>0:
-    return np.concatenate( np.asarray(self.v_items), axis=0 )  # shape=(n*h,w,c)
+      return np.concatenate( np.asarray(self.v_items), axis=0 )  # shape=(n*h,w,c)
     
 
 
