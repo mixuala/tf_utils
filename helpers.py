@@ -234,9 +234,12 @@ class Image:
     Returns:
       image as np.array
     """
-    *dim,_ = arr.shape
-    target =  tuple( np.array(dim)//scale )
-    return skimage_resize( arr, target ).astype('float32')
+    if hasattr(arr, 'numpy') and callable(arr.numpy):
+      arr = arr.numpy()
+    h,w,c = arr.shape
+    dim = (np.array([h,w])//scale)
+    return skimage_resize( arr, dim , anti_aliasing=True).astype('float32')
+
 
   @staticmethod
   def resize(arr, shape, resize_method='contained'):
@@ -266,8 +269,8 @@ class Image:
     target_shape = shape[:2]
     _resize_cmd = tf.image.resize if tf.is_tensor(arr) else skimage_resize
 
-    # see also: tf.image.resize( input, target_shape )
-    x = tf.image.resize(x, target_shape)
+    # # see also: tf.image.resize( input, target_shape )
+    # x = tf.image.resize(x, target_shape)
 
     if (resize_method is None): 
       return _resize_cmd( arr, shape[:2], anti_aliasing=True )
