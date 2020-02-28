@@ -159,12 +159,10 @@ class VGG:
     return images
 
 
-
 class ImgStacker():
-  """log a series of learned images with the same shape
+  """log an list of (batched) images with the same shape
 
-  typically a series of samples from one epoch in a row
-  with each row from successive epochs
+  typically a series of samples from one epoch in a row with each row from successive epochs
   """
   _shape=None
   h_items=[]
@@ -191,28 +189,53 @@ class ImgStacker():
     """stack a horizonal row of images into 1 ndarray, most recent first
     
       Args:
-        image, shape=(h,w,c), if None, returns current hstack
+        image:
+          shape=(h,w,c), 
+          batch images, e.g. shape=(b,h,w,c), stacks batch as 1 row
+          if None, returns current hstack
+
       Returns: shape=(h,n*w,c), n<=limit
     """
+    if image is not None and len(image.shape)==4:
+      b,h,w,c = image.shape
+      unbatched = [image[i].numpy() for i in range(b)]
+      image = np.concatenate( np.asarray(unbatched), axis=1 ) 
+      limit=1
+        
     if image is not None:
       if smaller:
         image = Image.smaller(np.squeeze(image))
       self.h_items.insert(0, image) # most recent on the left
       self.h_items = self.h_items[:limit]
-    return np.concatenate( np.asarray(self.h_items), axis=1 )  # shape=(h,n*w,c)
+    
+    if len(self.h_items)>0:
+      return np.concatenate( np.asarray(self.h_items), axis=1 )  # shape=(h,n*w,c)
 
-  def vstack(self, row=None, limit=10):
+  def vstack(self, row=None, limit=10, smaller=None):
     """stack a vertical row of images into 1 ndarray, most recent last
     
       Args:
-        row, shape=(h,w,c), if None, returns current hstack
+        row: 
+          shape=(h,n*w,c)
+          list,tuple of batch images, e.g. shape=[(b,h,w,c), (b,h,w,c),...]
+          if None, returns current vstack
+
       Returns: shape=(n*h,w,c), n<=limit
     """
-    if row is not None:
+    if isinstance(row, (tuple,list)):
+      # stack list of batches vertically
+      for one_row in row:
+        assert len(one_row.shape)==4, "ERROR: expecting a list of batched images, got batch.shape={}".format(one_row.shape)
+        if smaller is None: smaller = False 
+        stacked_row = self.hstack(one_row, limit=1, smaller=smaller)
+        self.vstack(stacked_row, limit=len(row))
+        
+    elif row is not None:
       if len(self.v_items)>0:
         assert row.shape==self.v_items[0].shape, "expecting row of shape={}".format(self.v_items[0].shape)
       self.v_items.insert(0, row) # most recent on the top
       self.v_items = self.v_items[:limit]
+
     if len(self.v_items)>0:
       return np.concatenate( np.asarray(self.v_items), axis=0 )  # shape=(n*h,w,c)
     
@@ -332,37 +355,78 @@ class Image:
 
     Returns: dict={id:, link:, deletehash:}
     """
+    payload = {}
+
+    if isinstance( stringOrTensor, str):
+      MAX_ARG_STRLEN = 131072
+      dataURL = stringOrTensor
+      assert dataURL.startswith("data:image"), "ERROR: expecting an image dataURL" 
+      assert len(payload) < MAX_ARG_STRLEN, "ERROR: MAX_ARG_STRLEN exceeeded"
+      dataURL = dataURL.split(',',1).pop() # strip base64 prefix
+      payload['image'] = escape(dataURL)
+
+
+    elif tf.is_tensor( stringOrTensor ):
+      fname = Image.save_image(stringOrTensor)
+      with open("/tmp/{}".format(fname), mode='rb') as file: # b is important -> binary
+        payload['image'] = file.read()
+      
+    else:
+      assert False, "expecting a dataURL or tensor"
+
+
     from html import escape
     from json import loads
     CLIENT_ID = "a098034b70f2f30"
-    MAX_ARG_STRLEN = 131072
     default_pick = ['id', 'link', 'deletehash']
     pick = pick if pick is not None else default_pick
 
-    assert dataURL.startswith("data:image"), "ERROR: expecting an image dataURL" 
-    dataURL = dataURL.split(',',1).pop() # strip base64 prefix
-
     # ## NOTE: additional post params are not working
-    # extras = ""
-    # if title is not None:
-    #   extras += "&title={}".format( escape(title) )
-    # if desc is not None:
-    #   extras += "&description={}".format( escape(desc) )
-    # print("extras", extras)
-    # payload += extras
+    if title is not None:
+      payload['title'] = escape(title)
+    if desc is not None:
+      payload['description'] = escape(desc)
 
-    assert len(payload) < MAX_ARG_STRLEN, "ERROR: MAX_ARG_STRLEN exceeeded"
+    ### example: curl
+    # resp = !curl --location --request POST "https://api.imgur.com/3/image" \
+    #   --header "Authorization: Client-ID $CLIENT_ID " \
+    #   --form "$payload"
+
     import requests
     headers = {
         'Authorization': 'Client-ID $CLIENT_ID',
     }
-    resp = requests.post('https://api.imgur.com/3/image', headers=headers, data={'image':escape(dataURL)})
-    # resp = !curl --location --request POST "https://api.imgur.com/3/image" \
-    #   --header "Authorization: Client-ID $CLIENT_ID " \
-    #   --form "$payload"
+    resp = requests.post('https://api.imgur.com/3/image', headers=headers, data=payload)
     resp = loads(resp[0])
     assert resp['success'], "Imgur API error: {}".format(resp)
     data = resp['data']
     # print(data)
     result = { k:v for k,v in data.items() if k in pick and v is not None }
+
+    # cleanup
+    try:
+      os.remove("/tmp/{}".format(fname))
+    except: pass
+
     return result
+
+  @staticmethod
+  def save_image(array, fname=None):
+    """save image tensor as png file
+
+    Args:
+      array, shape=(h,w,c)
+      fname, string, if None, then use Uuid hex string. extension will be ".png"
+    """
+    from PIL import Image
+    from google.colab import files
+    import os.path
+    import uuid
+    data = tf.image.convert_image_dtype(array, dtype=tf.uint8) # clips to domain(0,255)
+    im = Image.fromarray(data.numpy(), mode='RGB')
+    if fname is None: 
+      fname = uuid.uuid4().hex
+    if not fname.endswith('.png'): 
+      fname += '.png'
+    im.save("/tmp/{}".format(fname))
+    return fname
