@@ -90,7 +90,7 @@ def images(arrays, labels=None, domain=None, w=None):
 
   s = '<div style="display: flex; flex-direction: row;">'
   for i, array in enumerate(arrays):
-    url = _image_url(array)
+    url = _image_url(array, domain=domain)
     label = labels[i] if labels is not None else i
     width = """width:{w}px;""".format(w=w) if w is not None else ""
     s += """<div style="margin-right:10px;">
@@ -101,7 +101,7 @@ def images(arrays, labels=None, domain=None, w=None):
   _display_html(s)
 
 
-def show(thing, domain=(0, 1), **kwargs):
+def show(thing, domain=None, **kwargs):
   """Display a numpy array without having to specify what it represents.
 
   This module will attempt to infer how to display your tensor based on its
