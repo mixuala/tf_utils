@@ -17,36 +17,35 @@
 
 This module takes a URL, infers how to locate it,
 loads the data into memory and returns it.
+
+monkey_patch tensorflow.gfile
+
 """
-
-from __future__ import absolute_import, division, print_function
-from future.standard_library import install_aliases
-
-install_aliases()
-
 from contextlib import contextmanager
+import hashlib
 import os
 import re
 import logging
-from urllib.parse import urlparse, urljoin
-from future.moves.urllib import request
+from urllib.parse import urlparse
+from urllib import request
+# from tensorflow import gfile
+import tensorflow as tf
 from tempfile import gettempdir
-from io import BytesIO, StringIO
 import gc
 from filelock import FileLock
 
-# from tensorflow import gfile
-import tensorflow as tf
+from tf_utils.io.writing import write_handle
+from tf_utils.io.scoping import scope_url
+
+
 if tf.__version__.startswith("2."):
-  gfile = tf.io.gfile
+  from tensorflow.io import gfile
   # monkey_patch alias `gfile.Open()`
   setattr(gfile, "Open", gfile.GFile) 
 else:
   from tensorflow import gfile
 
-from tf_utils.io.writing import write, write_handle
-
-
+  
 # create logger with module name, e.g. tf_utils.io.reading
 log = logging.getLogger(__name__)
 
@@ -103,9 +102,11 @@ def read_handle(url, cache=None, mode="rb"):
         A file handle to the specified resource if it could be reached.
         The handle will be closed automatically once execution leaves this context.
     """
+    url = scope_url(url)
+
     scheme = urlparse(url).scheme
 
-    if cache == 'purge':
+    if cache == "purge":
         _purge_cached(url)
         cache = None
 
@@ -118,8 +119,10 @@ def read_handle(url, cache=None, mode="rb"):
     else:
         if scheme in ("http", "https"):
             handle = _handle_web_url(url, mode=mode)
-        else:
+        elif scheme in ("gs"):
             handle = _handle_gfile(url, mode=mode)
+        else:
+            handle = open(url, mode=mode)
 
     yield handle
     handle.close()
@@ -144,12 +147,27 @@ def _is_remote(scheme):
 
 
 RESERVED_PATH_CHARS = re.compile("[^a-zA-Z0-9]")
+LUCID_CACHE_DIR_NAME = 'lucid_cache'
+MAX_FILENAME_LENGTH = 200
+_LUCID_CACHE_DIR = None  # filled on first use
 
 
 def local_cache_path(remote_url):
+    global _LUCID_CACHE_DIR
     """Returns the path that remote_url would be cached at locally."""
     local_name = RESERVED_PATH_CHARS.sub("_", remote_url)
-    return os.path.join(gettempdir(), local_name)
+    if len(local_name) > MAX_FILENAME_LENGTH:
+        filename_hash = hashlib.sha256(local_name.encode('utf-8')).hexdigest()
+        truncated_name = local_name[:(MAX_FILENAME_LENGTH-(len(filename_hash)) - 1)] + '-' + filename_hash
+        log.debug(f'truncated long cache filename to {truncated_name} (original {len(local_name)} char name: {local_name}')
+        local_name = truncated_name
+    if _LUCID_CACHE_DIR is None:
+        _LUCID_CACHE_DIR = os.path.join(gettempdir(), LUCID_CACHE_DIR_NAME)
+        if not os.path.exists(_LUCID_CACHE_DIR):
+            # folder might exist if another thread/process creates it concurrently, this would be ok
+            os.makedirs(_LUCID_CACHE_DIR, exist_ok=True)
+            log.info(f'created lucid cache dir at {_LUCID_CACHE_DIR}')
+    return os.path.join(_LUCID_CACHE_DIR, local_name)
 
 
 def _purge_cached(url):
@@ -163,14 +181,15 @@ def _purge_cached(url):
         except OSError:
             pass
 
+
 def _read_and_cache(url, mode="rb"):
     local_path = local_cache_path(url)
     lock = FileLock(local_path + ".lockfile")
     with lock:
         if os.path.exists(local_path):
-            log.info("Found cached file '%s'.", local_path)
+            log.debug("Found cached file '%s'.", local_path)
             return _handle_gfile(local_path)
-        log.info("Caching URL '%s' locally at '%s'.", url, local_path)
+        log.debug("Caching URL '%s' locally at '%s'.", url, local_path)
         try:
             with write_handle(local_path, "wb") as output_handle, read_handle(
                 url, cache=False, mode="rb"
@@ -179,8 +198,10 @@ def _read_and_cache(url, mode="rb"):
                     output_handle.write(chunk)
             gc.collect()
             return _handle_gfile(local_path, mode=mode)
-        except:  # bare except to catch things like SystemExit or KeyboardInterrupt
-            log.warning("An Exception occured while caching a file, cleaning up.")
+        except tf.errors.NotFoundError:
+            raise
+        except Exception as e:  # bare except to catch things like SystemExit or KeyboardInterrupt
+            log.warning("Caching (%s -> %s) failed: %s", url, local_path, e)
             try:
                 os.remove(local_path)
             except OSError:
@@ -188,14 +209,12 @@ def _read_and_cache(url, mode="rb"):
             raise
 
 
-
-
 from functools import partial
-from io import DEFAULT_BUFFER_SIZE
+_READ_BUFFER_SIZE = 1048576     # setting a larger value here to help read bigger chunks of files over the network (eg from GCS)
 
 
 def _file_chunk_iterator(file_handle):
-    reader = partial(file_handle.read, DEFAULT_BUFFER_SIZE)
+    reader = partial(file_handle.read, _READ_BUFFER_SIZE)
     file_iterator = iter(reader, bytes())
     # TODO: once dropping Python <3.3 compat, update to `yield from ...`
     for chunk in file_iterator:

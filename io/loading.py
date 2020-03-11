@@ -20,39 +20,75 @@ loads the data into memory and returns a convenient representation.
 
 This should support for example PNG images, JSON files, npy files, etc.
 """
-
-from __future__ import absolute_import, division, print_function
-
+import io
+import lzma
 import os
 import json
 import logging
+import pickle
+
 import numpy as np
 import PIL.Image
 import tensorflow as tf
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from google.protobuf.message import DecodeError
 
 from tf_utils.io.reading import read_handle
+from tf_utils.io.scoping import current_io_scopes, set_io_scopes
+from tf_utils.io.saving import nullcontext
+
+# from lucid import modelzoo
 
 
 # create logger with module name, e.g. tf_utils.io.reading
 log = logging.getLogger(__name__)
 
 
+def _load_urls(urls, cache=None, **kwargs):
+    if not urls:
+        return []
+    pages = {}
+    caller_io_scopes = current_io_scopes()
+
+    def _do_load(url):
+        set_io_scopes(caller_io_scopes)
+        return load(url, cache=cache, **kwargs)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        future_to_urls = {
+            executor.submit(_do_load, url): url for url in urls
+        }
+        for future in as_completed(future_to_urls):
+            url = future_to_urls[future]
+            try:
+                pages[url] = future.result()
+            except Exception as exc:
+                pages[url] = exc
+                log.error("Loading {} generated an exception: {}".format(url, exc))
+    ordered = [pages[url] for url in urls]
+    return ordered
+
+
 def _load_npy(handle, **kwargs):
     """Load npy file as numpy array."""
-    del kwargs
-    return np.load(handle)
+    return np.load(handle, **kwargs)
 
 
-def _load_img(handle, target_dtype=np.float32, **kwargs):
+def _load_img(handle, target_dtype=np.float32, size=None, **kwargs):
     """Load image file as numpy array."""
 
-    image_pil = PIL.Image.open(handle)
+    image_pil = PIL.Image.open(handle, **kwargs)
 
     # resize the image to the requested size, if one was specified
-    if 'size' in kwargs:
-      requested_image_size = kwargs['size']
-      image_pil = image_pil.resize(requested_image_size, resample=PIL.Image.LANCZOS)
+    if size is not None:
+        if len(size) > 2:
+            size = size[:2]
+            log.warning(
+                "`_load_img()` received size: {}, trimming to first two dims!".format(
+                    size
+                )
+            )
+        image_pil = image_pil.resize(size, resample=PIL.Image.LANCZOS)
 
     image_array = np.asarray(image_pil)
 
@@ -64,30 +100,54 @@ def _load_img(handle, target_dtype=np.float32, **kwargs):
     image_max_value = np.iinfo(image_dtype).max  # ...for uint8 that's 255, etc.
 
     # using np.divide should avoid an extra copy compared to doing division first
-    return np.divide(image_array, image_max_value, dtype=target_dtype)
+    ndimage = np.divide(image_array, image_max_value, dtype=target_dtype)
+
+    rank = len(ndimage.shape)
+    if rank == 3:
+        return ndimage
+    elif rank == 2:
+        return np.repeat(np.expand_dims(ndimage, axis=2), 3, axis=2)
+    else:
+        message = "Loaded image has more dimensions than expected: {}".format(rank)
+        raise NotImplementedError(message)
 
 
 def _load_json(handle, **kwargs):
     """Load json file as python object."""
-    del kwargs
-    return json.load(handle)
+    return json.load(handle, **kwargs)
 
 
 def _load_text(handle, split=False, encoding="utf-8"):
     """Load and decode a string."""
-
     string = handle.read().decode(encoding)
-
-    if split:
-        return string.splitlines()
-    else:
-        return string
+    return string.splitlines() if split else string
 
 
 def _load_graphdef_protobuf(handle, **kwargs):
     """Load GraphDef from a binary proto file."""
-    del kwargs
-    return tf.GraphDef.FromString(handle.read())
+    # as_graph_def
+    graph_def = tf.GraphDef.FromString(handle.read())
+
+    # check if this is a lucid-saved model
+    # metadata = modelzoo.util.extract_metadata(graph_def)
+    # if metadata is not None:
+    #   url = handle.name
+    #   return modelzoo.vision_base.Model.load_from_metadata(url, metadata)
+
+    # else return a normal graph_def
+    return graph_def
+
+
+def _load_pickle(handle, **kwargs):
+  """Load a pickled python object."""
+  return pickle.load(handle, **kwargs)
+
+
+def _decompress_xz(handle, **kwargs):
+    if not hasattr(handle, 'seekable') or not handle.seekable():
+        # this handle is not seekable (gfile currently isn't), must load it all into memory to help lzma seek through it
+        handle = io.BytesIO(handle.read())
+    return lzma.LZMAFile(handle, mode="rb", format=lzma.FORMAT_XZ)
 
 
 loaders = {
@@ -103,7 +163,18 @@ loaders = {
 }
 
 
-def load(url_or_handle, cache=None, encoding="utf-8", **kwargs):
+unsafe_loaders = {
+    ".pickle": _load_pickle,
+    ".pkl": _load_pickle,
+}
+
+
+decompressors = {
+    ".xz": _decompress_xz,
+}
+
+
+def load(url_or_handle, allow_unsafe_formats=False, cache=None, **kwargs):
     """Load a file.
 
     File format is inferred from url. File retrieval strategy is inferred from
@@ -111,20 +182,32 @@ def load(url_or_handle, cache=None, encoding="utf-8", **kwargs):
 
     Args:
       url_or_handle: a (reachable) URL, or an already open file handle
+      allow_unsafe_formats: set to True to allow saving unsafe formats (eg. pickles)
 
     Raises:
       RuntimeError: If file extension or URL is not supported.
     """
 
-    ext = get_extension(url_or_handle)
+    # handle lists of URLs in a performant manner
+    if isinstance(url_or_handle, (list, tuple)):
+        return _load_urls(url_or_handle, cache=cache, **kwargs)
+
+    ext, decompressor_ext = _get_extension(url_or_handle)
     try:
-        loader = loaders[ext.lower()]
+        ext = ext.lower()
+        if ext in loaders:
+            loader = loaders[ext]
+        elif ext in unsafe_loaders:
+            if not allow_unsafe_formats:
+                raise ValueError(f"{ext} is considered unsafe, you must explicitly allow its use by passing allow_unsafe_formats=True")
+            loader = unsafe_loaders[ext]
+        else:
+            raise KeyError(f'no loader found for {ext}')
+        decompressor = decompressors[decompressor_ext] if decompressor_ext is not None else nullcontext
         message = "Using inferred loader '%s' due to passed file extension '%s'."
         log.debug(message, loader.__name__[6:], ext)
-        return load_using_loader(url_or_handle, loader, cache, encoding, **kwargs)
-
+        return load_using_loader(url_or_handle, decompressor, loader, cache, **kwargs)
     except KeyError:
-
         log.warning("Unknown extension '%s', attempting to load as image.", ext)
         try:
             with read_handle(url_or_handle, cache=cache) as handle:
@@ -140,20 +223,27 @@ def load(url_or_handle, cache=None, encoding="utf-8", **kwargs):
 
 # Helpers
 
-def load_using_loader(url_or_handle, loader, cache, encoding, **kwargs):
+
+def load_using_loader(url_or_handle, decompressor, loader, cache, **kwargs):
     if is_handle(url_or_handle):
-        result = loader(url_or_handle, encoding=encoding, **kwargs)
+        with decompressor(url_or_handle) as decompressor_handle:
+            result = loader(decompressor_handle, **kwargs)
     else:
         url = url_or_handle
         try:
             with read_handle(url, cache=cache) as handle:
-                result = loader(handle, encoding=encoding, **kwargs)
+                with decompressor(handle) as decompressor_handle:
+                    result = loader(decompressor_handle, **kwargs)
         except (DecodeError, ValueError):
-            log.warning("While loading '%s' an error occurred. Purging cache once and trying again; if this fails we will raise an Exception!", url)
+            log.warning(
+                "While loading '%s' an error occurred. Purging cache once and trying again; if this fails we will raise an Exception! Current io scopes: %r",
+                url,
+                current_io_scopes(),
+            )
             # since this may have been cached, it's our responsibility to try again once
             # since we use a handle here, the next DecodeError should propagate upwards
-            with read_handle(url, cache='purge') as handle:
-                result = load_using_loader(handle, loader, cache, encoding, **kwargs)
+            with read_handle(url, cache="purge") as handle:
+                result = load_using_loader(handle, decompressor, loader, cache, **kwargs)
     return result
 
 
@@ -161,11 +251,18 @@ def is_handle(url_or_handle):
     return hasattr(url_or_handle, "read") and hasattr(url_or_handle, "name")
 
 
-def get_extension(url_or_handle):
+def _get_extension(url_or_handle):
+    compression_ext = None
     if is_handle(url_or_handle):
-        _, ext = os.path.splitext(url_or_handle.name)
+        path_without_ext, ext = os.path.splitext(url_or_handle.name)
     else:
-        _, ext = os.path.splitext(url_or_handle)
+        path_without_ext, ext = os.path.splitext(url_or_handle)
+
+    if ext in decompressors:
+        decompressor_ext = ext
+        _, ext = os.path.splitext(path_without_ext)
+    else:
+        decompressor_ext = None
     if not ext:
         raise RuntimeError("No extension in URL: " + url_or_handle)
-    return ext
+    return ext, decompressor_ext

@@ -26,6 +26,7 @@ from string import Template
 import tensorflow as tf
 
 from tf_utils.io.serialize_array import serialize_array, array_to_jsbuffer
+from tf_utils.io.collapse_channels import collapse_channels
 
 
 # create logger with module name, e.g. tf_utils.io.showing
@@ -40,14 +41,12 @@ def _image_url(array, fmt='png', mode="data", quality=90, domain=None):
   """Create a data URL representing an image from a PIL.Image.
 
   Args:
-    image: a numpy
+    image: a numpy array
     mode: presently only supports "data" for data URL
 
   Returns:
     URL representing image
   """
-  # TODO: think about supporting saving to CNS, potential params: cns, name
-  # TODO: think about saving to Cloud Storage
   supported_modes = ("data")
   if mode not in supported_modes:
     message = "Unsupported mode '%s', should be one of '%s'."
@@ -60,8 +59,14 @@ def _image_url(array, fmt='png', mode="data", quality=90, domain=None):
 
 # public functions
 
+def _image_html(array, w=None, domain=None, fmt='png'):
+  url = _image_url(array, domain=domain, fmt=fmt)
+  style = "image-rendering: pixelated;"
+  if w is not None:
+    style += "width: {w}px;".format(w=w)
+  return """<img src="{url}" style="{style}">""".format(**locals())
 
-def image(array, domain=None, w=None, format='png'):
+def image(array, domain=None, w=None, format='png', **kwargs):
   """Display an image.
 
   Args:
@@ -71,9 +76,10 @@ def image(array, domain=None, w=None, format='png'):
     w: width of output image, scaled using nearest neighbor interpolation.
       size unchanged if None
   """
-  data_url = _image_url(array, domain=domain, fmt=format)
-  html = '<img src=\"' + data_url + '\">'
-  _display_html(html)
+
+  _display_html(
+    _image_html(array, w=w, domain=domain, fmt=format)
+  )
 
 
 def images(arrays, labels=None, domain=None, w=None):
@@ -90,13 +96,12 @@ def images(arrays, labels=None, domain=None, w=None):
 
   s = '<div style="display: flex; flex-direction: row;">'
   for i, array in enumerate(arrays):
-    url = _image_url(array, domain=domain)
     label = labels[i] if labels is not None else i
-    width = """width:{w}px;""".format(w=w) if w is not None else ""
-    s += """<div style="margin-right:10px;">
-              {label}<br/>
-              <img src="{url}" style="margin-top:4px;{width}">
-            </div>""".format(label=label, url=url, width=width)
+    img_html = _image_html(array, w=w, domain=domain)
+    s += """<div style="margin-right:10px; margin-top: 4px;">
+              {label} <br/>
+              {img_html}
+            </div>""".format(**locals())
   s += "</div>"
   _display_html(s)
 
@@ -108,18 +113,51 @@ def show(thing, domain=None, **kwargs):
   rank, shape and dtype. rank 4 tensors will be displayed as image grids, rank
   2 and 3 tensors as images.
 
-  Args:
-    thing: A list of NumPy arrays representing images
-    domain: Domain of pixel values, inferred from min & max values if None
-    labels: A list of strings to label each image.
-      Defaults to show index if None
-    w: width of output image, scaled using nearest neighbor interpolation.
-      size unchanged if None
+  For tensors of rank 3 or 4, the innermost dimension is interpreted as channel.
+  Depending on the size of that dimension, different types of images will be
+  generated:
+
+    shp[-1]
+      = 1  --  Black and white image.
+      = 2  --  See >4
+      = 3  --  RGB image.
+      = 4  --  RGBA image.
+      > 4  --  Collapse into an RGB image.
+               If all positive: each dimension gets an evenly spaced hue.
+               If pos and neg: each dimension gets two hues
+                  (180 degrees apart) for positive and negative.
+
+  Common optional arguments:
+
+    domain: range values can be between, for displaying normal images
+      None  = infer domain with heuristics
+      (a,b) = clip values to be between a (min) and b (max).
+
+    w: width of displayed images
+      None  = display 1 pixel per value
+      int   = display n pixels per value (often used for small images)
+
+    labels: if displaying multiple objects, label for each object.
+      None  = label with index
+      []    = no labels
+      [...] = label with corresponding list item
+
   """
-  if hasattr(thing,'numpy') and callable(thing.numpy):
-    thing = thing.numpy()
+  def collapse_if_needed(arr):
+    K = arr.shape[-1]
+    if K not in [1,3,4]:
+      log.debug("Collapsing %s channels into 3 RGB channels." % K)
+      return collapse_channels(arr)
+    else:
+      return arr
+
+
   if isinstance(thing, np.ndarray):
     rank = len(thing.shape)
+
+    if rank in [3,4]:
+      thing = collapse_if_needed(thing)
+
     if rank == 4:
       log.debug("Show is assuming rank 4 tensor to be a list of images.")
       images(thing, domain=domain, **kwargs)
@@ -131,6 +169,10 @@ def show(thing, domain=None, **kwargs):
       print(repr(thing))
   elif isinstance(thing, (list, tuple)):
     log.debug("Show is assuming list or tuple to be a collection of images.")
+
+    if isinstance(thing[0], np.ndarray) and len(thing[0].shape) == 3:
+      thing = [collapse_if_needed(t) for t in thing]
+
     images(thing, domain=domain, **kwargs)
   else:
     log.warning("Show only supports numpy arrays so far. Using repr().")
@@ -283,13 +325,13 @@ def textured_mesh(mesh, texture, background='0xffffff'):
 
 def _strip_consts(graph_def, max_const_size=32):
     """Strip large constant values from graph_def.
-    
+
     This is mostly a utility function for graph(), and also originates here:
     https://github.com/tensorflow/tensorflow/blob/master/tensorflow/examples/tutorials/deepdream/deepdream.ipynb
     """
     strip_def = tf.GraphDef()
     for n0 in graph_def.node:
-        n = strip_def.node.add() 
+        n = strip_def.node.add()
         n.MergeFrom(n0)
         if n.op == 'Const':
             tensor = n.attr['value'].tensor
@@ -301,7 +343,7 @@ def _strip_consts(graph_def, max_const_size=32):
 
 def graph(graph_def, max_const_size=32):
     """Visualize a TensorFlow graph.
-    
+
     This function was originally found in this notebook (also Apache licensed):
     https://github.com/tensorflow/tensorflow/blob/master/tensorflow/examples/tutorials/deepdream/deepdream.ipynb
     """
@@ -319,7 +361,7 @@ def graph(graph_def, max_const_size=32):
           <tf-graph-basic id="{id}"></tf-graph-basic>
         </div>
     """.format(data=repr(str(strip_def)), id='graph'+str(np.random.rand()))
-  
+
     iframe = """
         <iframe seamless style="width:100%; height:620px; border: none;" srcdoc="{}"></iframe>
     """.format(code.replace('"', '&quot;'))
